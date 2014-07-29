@@ -1,6 +1,7 @@
 package sidekick
 
 import (
+	"errors"
 	"github.com/coreos/go-etcd/etcd"
 	"log"
 	"strings"
@@ -8,11 +9,11 @@ import (
 	"time"
 )
 
-// TTL is the time-to-live in seconds for updates to etcd
-const TTL = 10
+// DefaultTTL is the time-to-live in seconds for updates to etcd
+const DefaultTTL = 10
 
-// UpdateInterval is how frequently in seconds the key will be updated until Stop() is called
-const UpdateInterval = 8
+// DefaultUpdateInterval is how frequently in seconds the key will be updated until Stop() is called
+const DefaultUpdateInterval = 8
 
 // Sidekick periodically updates a key in etcd until Stop() is called
 type Sidekick struct {
@@ -24,7 +25,13 @@ type Sidekick struct {
 	timer  *time.Timer
 	closed bool
 	sync.Mutex
+	ttl            uint64
+	updateInterval uint64
 }
+
+var (
+	ErrIntervalTooSmall = errors.New("interval must be at least 1 second")
+)
 
 // New returns a Sidekick pointer if there was no error initially setting the value,
 // and there will be a goroutine updating the value every UpdateInterval seconds until
@@ -36,27 +43,52 @@ func New(servers string, key string, value string) (*Sidekick, error) {
 	sk.client = etcd.NewClient(etcdNodes)
 	sk.quitCh = make(chan bool)
 	sk.key = key
-	_, err := sk.client.Set(sk.key, value, TTL)
+	sk.ttl = DefaultTTL
+	sk.updateInterval = DefaultUpdateInterval
+	_, err := sk.client.Set(sk.key, sk.value, sk.ttl)
 	if err != nil {
 		return nil, err
 	}
-	go sk.updateLoop()
+	go sk.loop()
 	return sk, nil
 }
 
 // SetLogger sets a logger, by default no logs are written
 func (sk *Sidekick) SetLogger(logger *log.Logger) {
+	sk.Lock()
+	defer sk.Unlock()
 	sk.logger = logger
 }
-func (sk *Sidekick) updateLoop() {
-	sk.timer = time.NewTimer(UpdateInterval * time.Second)
+
+// TTL sets the time-to-live on every update made to etcd
+// TODO: validation on TTL
+func (sk *Sidekick) TTL(ttl uint64) error {
+	sk.Lock()
+	defer sk.Unlock()
+	sk.ttl = ttl
+	return nil
+}
+
+// UpdateInterval sets the update interval to the value in seconds
+func (sk *Sidekick) UpdateInterval(interval uint64) error {
+	if interval < 1 {
+		return ErrIntervalTooSmall
+	}
+	sk.Lock()
+	defer sk.Unlock()
+	sk.updateInterval = interval
+	return nil
+}
+
+func (sk *Sidekick) loop() {
+	sk.timer = time.NewTimer(time.Duration(sk.updateInterval) * time.Second)
 	for {
 		select {
 		case <-sk.timer.C:
 			sk.Lock()
-			sk.timer.Reset(UpdateInterval * time.Second)
+			sk.timer.Reset(time.Duration(sk.updateInterval) * time.Second)
 			sk.Unlock()
-			_, err := sk.client.Set(sk.key, sk.value, TTL)
+			_, err := sk.client.Set(sk.key, sk.value, sk.ttl)
 			if err != nil && sk.logger != nil {
 				sk.logger.Printf("error updating %s %s\n", sk.key, err.Error())
 			}

@@ -21,3 +21,5 @@ Example:
   To stop updates to etcd, use:  
 
     sk.Stop()  
+
+If you want a standalone utility, the sidekicker folder has one
