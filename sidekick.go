@@ -9,10 +9,10 @@ import (
 	"time"
 )
 
-// DefaultTTL is the time-to-live in seconds for updates to etcd
+// DefaultTTL is the default time-to-live in seconds for updates to etcd
 const DefaultTTL = 10
 
-// DefaultUpdateInterval is how frequently in seconds the key will be updated until Stop() is called
+// DefaultUpdateInterval is the default frequently in seconds the key will be updated until Stop() is called
 const DefaultUpdateInterval = 8
 
 // Sidekick periodically updates a key in etcd until Stop() is called
@@ -53,51 +53,41 @@ func New(servers string, key string, value string) (*Sidekick, error) {
 	return sk, nil
 }
 
-// SetLogger sets a logger, by default no logs are written
+// SetLogger sets a logger, by default no logs are written. This is a no-op if Stop() has been called.
 func (sk *Sidekick) SetLogger(logger *log.Logger) {
+	if sk.closed {
+		return
+	}
 	sk.Lock()
 	defer sk.Unlock()
 	sk.logger = logger
 }
 
-// TTL sets the time-to-live on every update made to etcd
+// TTL sets the time-to-live on every update made to etcd. This is a no-op if Stop() has been called.
 // TODO: validation on TTL
 func (sk *Sidekick) TTL(ttl uint64) error {
+	if sk.closed {
+		return nil
+	}
 	sk.Lock()
 	defer sk.Unlock()
 	sk.ttl = ttl
 	return nil
 }
 
-// UpdateInterval sets the update interval to the value in seconds
+// UpdateInterval sets the update interval to the value in seconds. This is a no-op if Stop() has been called.
 func (sk *Sidekick) UpdateInterval(interval uint64) error {
+	if sk.closed {
+		return nil
+	}
 	if interval < 1 {
 		return ErrIntervalTooSmall
 	}
+
 	sk.Lock()
 	defer sk.Unlock()
 	sk.updateInterval = interval
 	return nil
-}
-
-func (sk *Sidekick) loop() {
-	sk.timer = time.NewTimer(time.Duration(sk.updateInterval) * time.Second)
-	for {
-		select {
-		case <-sk.timer.C:
-			sk.Lock()
-			sk.timer.Reset(time.Duration(sk.updateInterval) * time.Second)
-			sk.Unlock()
-			_, err := sk.client.Set(sk.key, sk.value, sk.ttl)
-			if err != nil && sk.logger != nil {
-				sk.logger.Printf("error updating %s %s\n", sk.key, err.Error())
-			}
-
-		case <-sk.quitCh:
-			sk.timer.Stop()
-			return
-		}
-	}
 }
 
 // Value changes the value used and performs an update.  This is a no-op if Stop() has been called.
@@ -125,5 +115,27 @@ func (sk *Sidekick) Stop() {
 	}
 	if sk.logger != nil {
 		sk.logger.Printf("stopped")
+	}
+}
+
+// loop keeps looping until the quitCh is closed
+func (sk *Sidekick) loop() {
+	sk.timer = time.NewTimer(time.Duration(sk.updateInterval) * time.Second)
+	for {
+		select {
+		case <-sk.timer.C:
+			sk.Lock()
+			sk.timer.Reset(time.Duration(sk.updateInterval) * time.Second)
+			sk.Unlock()
+			_, err := sk.client.Set(sk.key, sk.value, sk.ttl)
+			if err != nil && sk.logger != nil {
+				sk.logger.Printf("error updating %s %s\n", sk.key, err.Error())
+			}
+
+		case <-sk.quitCh:
+			sk.timer.Stop()
+			sk.timer = nil
+			return
+		}
 	}
 }

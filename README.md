@@ -21,5 +21,10 @@ Example:
   To stop updates to etcd, use:  
 
     sk.Stop()  
+	
+  To change from the default key TTL or update interval use:  
 
-If you want a standalone utility, the sidekicker folder has one
+    sk.TTL(seconds)  
+	sk.UpdateInterval(seconds)  
+
+If you want a standalone utility, see the sidekicker directory.
