@@ -4,11 +4,13 @@ import (
 	"github.com/coreos/go-etcd/etcd"
 	"log"
 	"strings"
+	"sync"
 	"time"
 )
 
 // TTL is the time-to-live in seconds for updates to etcd
 const TTL = 10
+
 // UpdateInterval is how frequently in seconds the key will be updated until Stop() is called
 const UpdateInterval = 8
 
@@ -19,7 +21,9 @@ type Sidekick struct {
 	value  string
 	logger *log.Logger
 	quitCh chan bool
+	timer  *time.Timer
 	closed bool
+	sync.Mutex
 }
 
 // New returns a Sidekick pointer if there was no error initially setting the value,
@@ -45,23 +49,38 @@ func (sk *Sidekick) SetLogger(logger *log.Logger) {
 	sk.logger = logger
 }
 func (sk *Sidekick) updateLoop() {
-	ticker := time.NewTicker(UpdateInterval * time.Second)
+	sk.timer = time.NewTimer(UpdateInterval * time.Second)
 	for {
 		select {
-		case <-ticker.C:
+		case <-sk.timer.C:
+			sk.Lock()
+			sk.timer.Reset(UpdateInterval * time.Second)
+			sk.Unlock()
 			_, err := sk.client.Set(sk.key, sk.value, TTL)
 			if err != nil && sk.logger != nil {
 				sk.logger.Printf("error updating %s %s\n", sk.key, err.Error())
 			}
 
 		case <-sk.quitCh:
-			ticker.Stop()
+			sk.timer.Stop()
 			return
 		}
 	}
 }
 
-// Stop stops the goroutine performing updates
+// Value changes the value used and performs an update.  This is a no-op if Stop() has been called.
+func (sk *Sidekick) Value(value string) {
+	if sk.closed {
+		return
+	}
+	sk.Lock()
+	defer sk.Unlock()
+	sk.value = value
+	// reset the timer so that an update will happen immediately
+	sk.timer.Reset(0)
+}
+
+// Stop stops the goroutine performing updates.  This is a no-op if Stop() has been called.
 func (sk *Sidekick) Stop() {
 	if sk.closed {
 		return
