@@ -11,13 +11,13 @@ Example:
     etcdServers := "http://localhost:4001"  
     etcdPath := "/servers/web/" + hostname  
     value := "running"  
-    sidekick, _ := Sidekick.New(etcdServers,etcdpath,value)  
+    sk, _ := sidekick.New(etcdServers,etcdpath,value)  
 
 
   To change the value of the key, use:  
 
-    sidekick.Value("newValue")  
+    sk.Value("newValue")  
 	
   To stop updates to etcd, use:  
 
-    sidekick.Stop()  
+    sk.Stop()  
