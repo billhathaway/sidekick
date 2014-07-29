@@ -13,7 +13,9 @@ Example:
 
 
   To change the value of the key, use:  
+
     sidekick.Value("somethingnew")  
 	
   To stop updates to etcd, use:  
+
     sidekick.Stop()  
